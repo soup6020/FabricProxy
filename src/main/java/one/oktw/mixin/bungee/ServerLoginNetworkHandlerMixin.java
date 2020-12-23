@@ -13,7 +13,6 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(ServerLoginNetworkHandler.class)
@@ -24,8 +23,16 @@ public abstract class ServerLoginNetworkHandlerMixin {
     public ClientConnection connection;
     @Shadow
     private GameProfile profile;
+    @Shadow
+    @Final
+    private MinecraftServer server;
 
-    @Inject(method = "onHello", at = @At(value = "FIELD", opcode = Opcodes.PUTFIELD, target = "Lnet/minecraft/server/network/ServerLoginNetworkHandler;profile:Lcom/mojang/authlib/GameProfile;", shift = At.Shift.AFTER))
+    @Shadow
+    public abstract void acceptPlayer();
+
+    private boolean ready = false;
+
+    @Inject(method = "onHello", at = @At(value = "FIELD", opcode = Opcodes.PUTFIELD, target = "Lnet/minecraft/server/network/ServerLoginNetworkHandler;profile:Lcom/mojang/authlib/GameProfile;", shift = At.Shift.AFTER), cancellable = true)
     private void initUuid(CallbackInfo ci) {
         if (FabricProxy.config.getBungeeCord()) {
             if (((BungeeClientConnection) connection).getSpoofedUUID() == null) {
@@ -40,6 +47,8 @@ public abstract class ServerLoginNetworkHandlerMixin {
                     this.profile.getProperties().put(property.getName(), property);
                 }
             }
+            ready = true;
+            ci.cancel();
         }
     }
 
@@ -48,11 +57,12 @@ public abstract class ServerLoginNetworkHandlerMixin {
         return (bypassProxyBungee || !FabricProxy.config.getBungeeCord()) && minecraftServer.isOnlineMode();
     }
     
-    @Inject(method = "tick()V", at = @At(value = "INVOKE", target = "Lnet/minecraft/server/network/ServerLoginNetworkHandler;acceptPlayer()V"), cancellable = true)
-    private void overwriteAcceptPlayer(CallbackInfo ci) {
-    	if(FabricProxy.config.getBungeeCordWorkaround()) {
-	        ((ServerLoginNetworkHandler) (Object) this).acceptPlayer();
-	        ci.cancel();
-    	}
+    @Inject(method = "tick", at = @At(value = "FIELD", target = "Lnet/minecraft/server/network/ServerLoginNetworkHandler;loginTicks:I"))
+    private void login(CallbackInfo ci) {
+        if (ready) {
+            ready = false;
+            acceptPlayer();
+        }
     }
+
 }
